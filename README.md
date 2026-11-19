@@ -1,5 +1,19 @@
 # Queen Bee — API Backend Node.js
 
+## État du livrable du jour 1 (tag `jour1-fin`)
+
+Fait :
+
+- TP 1 : lecture bloquante et en flux, mesures et réponses ci-dessous.
+- TP 2 : `GET /health`, `GET /api/hives`, `GET /api/hives/:id`, `POST /api/hives/:id/measures`, journal des requêtes.
+- TP 3 : contrat dans [docs/api.md](docs/api.md), mesures paginées, inspections, erreurs au format RFC 9457.
+- TP 4 : code en couches, configuration par `.env`, `npm test` au vert (2 tests).
+- Collection de requêtes : `postman/queenbee-api.postman_collection.json`, sans jeton ni mot de passe.
+
+Ce qui manque :
+
+- TP 3, étape 4 : la relecture du contrat par un groupe voisin n'a pas encore été faite.
+
 ## Démarrage
 
 ```bash
