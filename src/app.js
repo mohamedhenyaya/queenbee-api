@@ -1,23 +1,36 @@
 import express from "express";
 import { requestLogger } from "./middlewares/requestLogger.js";
 import { notFoundHandler, errorHandler } from "./middlewares/errorHandler.js";
-import hivesRouter from "./routes/hives.router.js";
+import { createHivesService } from "./services/hives.service.js";
+import { createMeasuresService } from "./services/measures.service.js";
+import { createInspectionsService } from "./services/inspections.service.js";
+import { createHivesController } from "./controllers/hives.controller.js";
+import { createHivesRouter } from "./routes/hives/hives.router.js";
 
-const app = express();
+// Crée l'application à partir des repositories qu'on lui passe (en mémoire aujourd'hui,
+// PostgreSQL demain) : c'est ici, et seulement ici, que les couches sont branchées.
+export function createApp({ hivesRepository, measuresRepository, inspectionsRepository }) {
+  const hivesService = createHivesService({ hivesRepository });
+  const measuresService = createMeasuresService({ hivesService, measuresRepository });
+  const inspectionsService = createInspectionsService({ hivesService, inspectionsRepository });
+  const hivesController = createHivesController({ hivesService, measuresService, inspectionsService });
 
-// Journal en premier, pour voir toutes les requêtes, y compris celles en erreur.
-app.use(requestLogger);
-// Lit le corps JSON des requêtes : doit être déclaré avant les routes.
-app.use(express.json());
+  const app = express();
 
-app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
-});
+  // Journal en premier, pour voir toutes les requêtes, y compris celles en erreur.
+  app.use(requestLogger);
+  // Lit le corps JSON des requêtes : doit être déclaré avant les routes.
+  app.use(express.json());
 
-app.use("/api/hives", hivesRouter);
+  app.get("/health", (req, res) => {
+    res.json({ status: "ok" });
+  });
 
-// Après toutes les routes : route inconnue, puis filet de sécurité.
-app.use(notFoundHandler);
-app.use(errorHandler);
+  app.use("/api/hives", createHivesRouter(hivesController));
 
-export default app;
+  // Après toutes les routes : route inconnue, puis filet de sécurité.
+  app.use(notFoundHandler);
+  app.use(errorHandler);
+
+  return app;
+}

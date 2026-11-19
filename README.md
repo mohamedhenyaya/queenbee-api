@@ -4,10 +4,35 @@
 
 ```bash
 npm install
-npm run dev          # http://localhost:3000
+cp .env.example .env   # puis remplacer les fausses valeurs
+npm run dev            # http://localhost:3000, recharge à chaque modification
+npm test               # tests node:test
 ```
 
-Collection de requêtes Postman : `postman/queenbee-api.postman_collection.json`.
+- Contrat de l'API : [docs/api.md](docs/api.md).
+- Collection Postman : `postman/queenbee-api.postman_collection.json` (Import, puis Run dans l'ordre).
+- Configuration (`.env`) : `PORT` (1 à 65535, 3000 par défaut) et `NODE_ENV` (`development`, `production` ou `test`). Une valeur invalide arrête le démarrage avec un message.
+
+## Architecture (TP 4)
+
+```
+src/
+  server.js           crée les repositories en mémoire, appelle createApp, puis listen
+  app.js              createApp(repositories) : branche services, contrôleur, routeur
+  config.js           lit PORT et NODE_ENV
+  errors.js           NotFoundError, ValidationError, ConflictError
+  routes/hives/       URL + verbe -> méthode du contrôleur
+  controllers/        lit la requête, choisit le code HTTP
+  services/           règles métier (validation, plages physiques)
+  repositories/memory lecture et écriture des données en mémoire
+  middlewares/        requestLogger, notFoundHandler, errorHandler
+  utils/problem.js    sendProblem, format d'erreur RFC 9457
+test/                 tests des services avec de faux repositories
+```
+
+Chaque service est une fabrique qui reçoit ses dépendances (`createMeasuresService({ hivesService, measuresRepository })`) et n'importe jamais de repository. Aucun contrôleur n'importe de repository : seuls les repositories changeront au jour 2 (PostgreSQL).
+
+Au démarrage, l'API charge 5 ruches et les mesures du 31 octobre des ruches SN-CASA (fichier `data/mesures-SN-CASA-2026-10-31.ndjson`). Les données sont perdues à chaque redémarrage.
 
 ## TP 2 — Journalisation
 

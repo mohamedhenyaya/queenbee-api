@@ -205,6 +205,35 @@
           ]
         },
         {
+          "name": "POST measures - poids hors plage, 500 kg (400)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"timestamp\": \"2026-11-01T10:15:00Z\",\n  \"weight_kg\": 500\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "POST measures - ruche inconnue (404)",
           "request": {
             "method": "POST",

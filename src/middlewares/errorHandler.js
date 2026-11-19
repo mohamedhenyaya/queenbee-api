@@ -1,4 +1,5 @@
 import { sendProblem } from "../utils/problem.js";
+import { NotFoundError, ValidationError, ConflictError } from "../errors.js";
 
 // Route inconnue : un 404 au format RFC 9457, au lieu de la page HTML d'Express.
 export function notFoundHandler(req, res) {
@@ -12,6 +13,11 @@ export function errorHandler(err, req, res, next) {
   if (err.type === "entity.parse.failed") {
     return sendProblem(res, 400, "Le corps de la requête n'est pas un JSON valide.");
   }
+  // Erreurs métier levées par les services : leur message est fait pour le client.
+  if (err instanceof ValidationError) return sendProblem(res, 400, err.message);
+  if (err instanceof NotFoundError) return sendProblem(res, 404, err.message);
+  if (err instanceof ConflictError) return sendProblem(res, 409, err.message);
+
   console.error(err); // la pile va dans le journal du serveur, jamais dans la réponse
   sendProblem(res, 500, "Une erreur interne est survenue.");
 }

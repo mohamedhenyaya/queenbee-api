@@ -138,7 +138,23 @@ Corps :
 - `timestamp` ou `weight_kg` manque ;
 - `timestamp` n'est pas une date ISO 8601 valide ;
 - un champ numérique n'est pas un nombre ;
+- un champ numérique sort de sa plage physique (UC-CY02, bornes incluses) :
+
+  | Champ | Min | Max |
+  | ----- | --: | --: |
+  | `position_lat` | -90 | 90 |
+  | `position_lon` | -180 | 180 |
+  | `weight_kg` | 0 | 150 |
+  | `temp_internal_c` | -10 | 60 |
+  | `temp_external_c` | -20 | 60 |
+  | `humidity_pct` | 0 | 100 |
+  | `acoustic_activity_score` | 0 | 1 |
+  | `battery_pct` | 0 | 100 |
+
+  Exemple : `"detail": "Le champ weight_kg doit être compris entre 0 et 150 (reçu : 500)."` ;
 - `hive_id` est présent mais différent de `:id`.
+
+Dans ce cas, rien n'est enregistré.
 
 ```json
 {
