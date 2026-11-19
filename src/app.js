@@ -1,5 +1,6 @@
 import express from "express";
 import { requestLogger } from "./middlewares/requestLogger.js";
+import { notFoundHandler, errorHandler } from "./middlewares/errorHandler.js";
 import hivesRouter from "./routes/hives.router.js";
 
 const app = express();
@@ -14,5 +15,9 @@ app.get("/health", (req, res) => {
 });
 
 app.use("/api/hives", hivesRouter);
+
+// Après toutes les routes : route inconnue, puis filet de sécurité.
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 export default app;
