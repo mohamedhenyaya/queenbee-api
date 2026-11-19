@@ -211,7 +211,8 @@ Paramètres : aucun en dehors de `:id`.
     "queen_present": true,
     "observations": "Couvain compact, réserves correctes.",
     "version": 1,
-    "created_at": "2026-11-19T11:30:00.000Z"
+    "created_at": "2026-11-19T11:30:00.000Z",
+    "updated_at": "2026-11-19T11:30:00.000Z"
   }
 ]
 ```
@@ -244,7 +245,7 @@ Corps :
 }
 ```
 
-**201** : l'inspection créée, avec `hive_id`, `version` (1) et `created_at` (heure de réception par le serveur).
+**201** : l'inspection créée, avec `hive_id`, `version` (1), `created_at` et `updated_at` (heure de réception par le serveur). Même forme que dans `GET /api/hives/:id/inspections`.
 
 **200** : une inspection portant déjà cet `id` a été reçue pour cette ruche (synchronisation rejouée). Le serveur renvoie l'inspection existante sans créer de doublon ni la modifier.
 

@@ -1,102 +1,649 @@
 {
   "info": {
     "name": "Queen Bee API",
-    "description": "Requêtes de l'API Queen Bee (TP 2). Lancer le serveur avec npm run dev.",
+    "description": "Requêtes de l'API Queen Bee (contrat : docs/api.md). Lancer le serveur avec npm run dev, puis exécuter la collection dans l'ordre (Run).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
-  "variable": [{ "key": "base_url", "value": "http://localhost:3000" }],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "inspection_id",
+      "value": ""
+    },
+    {
+      "key": "page0",
+      "value": ""
+    }
+  ],
   "item": [
     {
-      "name": "GET /health",
-      "request": { "method": "GET", "url": "{{base_url}}/health" },
-      "event": [{ "listen": "test", "script": { "exec": [
-        "pm.test('200', () => pm.response.to.have.status(200));",
-        "pm.test('status ok', () => pm.expect(pm.response.json()).to.eql({ status: 'ok' }));"
-      ] } }]
+      "name": "Ruches",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status ok', () => pm.expect(pm.response.json()).to.eql({ status: 'ok' }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/hives",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Liste non vide', () => pm.expect(pm.response.json()).to.be.an('array').that.is.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/hives?site_id=SN-CASA",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives?site_id=SN-CASA"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Seulement SN-CASA', () => { const l = pm.response.json(); pm.expect(l).to.not.be.empty; l.forEach((h) => pm.expect(h.site_id).to.eql('SN-CASA')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/hives/:id",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives/SN-CASA-001"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Bonne ruche', () => pm.expect(pm.response.json().id).to.eql('SN-CASA-001'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/hives/:id - ruche inconnue (404)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives/XX-NOPE-999"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(404); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     },
     {
-      "name": "GET /api/hives",
-      "request": { "method": "GET", "url": "{{base_url}}/api/hives" },
-      "event": [{ "listen": "test", "script": { "exec": [
-        "pm.test('200', () => pm.response.to.have.status(200));",
-        "pm.test('Liste de ruches', () => pm.expect(pm.response.json()).to.be.an('array').that.is.not.empty);"
-      ] } }]
+      "name": "Mesures",
+      "item": [
+        {
+          "name": "POST /api/hives/:id/measures",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hive_id\": \"SN-CASA-001\",\n  \"site_id\": \"SN-CASA\",\n  \"timestamp\": \"2026-11-01T10:00:00Z\",\n  \"position_lat\": 12.5743,\n  \"position_lon\": -16.2873,\n  \"weight_kg\": 36.84,\n  \"temp_internal_c\": 34.4,\n  \"temp_external_c\": 27.1,\n  \"humidity_pct\": 64,\n  \"acoustic_activity_score\": 0.42,\n  \"battery_pct\": 88\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Timestamp de la trame conservé', () => pm.expect(pm.response.json().timestamp).to.eql('2026-11-01T10:00:00Z'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST measures - sans timestamp (400)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"weight_kg\": 36.84\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST measures - hive_id différent du chemin (400)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-002/measures",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hive_id\": \"SN-CASA-001\",\n  \"timestamp\": \"2026-11-01T10:00:00Z\",\n  \"weight_kg\": 36.84\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST measures - ruche inconnue (404)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/XX-NOPE-999/measures",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"timestamp\": \"2026-11-01T10:00:00Z\",\n  \"weight_kg\": 36.84\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(404); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/hives/:id/measures",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('limit 50 et offset 0 par défaut', () => { pm.expect(r.limit).to.eql(50); pm.expect(r.offset).to.eql(0); pm.expect(r.items.length).to.be.at.most(50); });",
+                  "pm.test('De la plus récente à la plus ancienne', () => r.items.forEach((m, i) => i && pm.expect(Date.parse(r.items[i - 1].timestamp)).to.be.at.least(Date.parse(m.timestamp))));",
+                  "pm.collectionVariables.set('page0', JSON.stringify(r.items.map((m) => m.timestamp)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET measures ?offset=50 - aucune mesure de la page 0",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures?offset=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Aucune mesure répétée', () => { const page0 = JSON.parse(pm.collectionVariables.get('page0') || '[]'); pm.response.json().items.forEach((m) => pm.expect(page0).to.not.include(m.timestamp)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET measures ?limit=0 (400)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures?limit=0"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET measures ?limit=501 (400)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures?limit=501"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET measures ?limit=abc (400)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures?limit=abc"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET measures ?offset=-1 (400)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures?offset=-1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET measures - ruche inconnue (404)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives/XX-NOPE-999/measures"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(404); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     },
     {
-      "name": "GET /api/hives?site_id=SN-CASA",
-      "request": { "method": "GET", "url": "{{base_url}}/api/hives?site_id=SN-CASA" },
-      "event": [{ "listen": "test", "script": { "exec": [
-        "pm.test('200', () => pm.response.to.have.status(200));",
-        "pm.test('Seulement SN-CASA', () => {",
-        "  const liste = pm.response.json();",
-        "  pm.expect(liste).to.not.be.empty;",
-        "  liste.forEach((h) => pm.expect(h.site_id).to.eql('SN-CASA'));",
-        "});"
-      ] } }]
+      "name": "Inspections",
+      "item": [
+        {
+          "name": "POST /api/hives/:id/inspections",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/inspections",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{inspection_id}}\",\n  \"inspected_at\": \"2026-10-31T09:30:00Z\",\n  \"colony_status\": \"forte\",\n  \"queen_present\": true,\n  \"observations\": \"Couvain compact, réserves correctes.\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// UUID choisi par le client, comme l'application mobile",
+                  "pm.collectionVariables.set('inspection_id', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Même id que celui envoyé', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('inspection_id')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST inspections - synchronisation rejouée (200)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/inspections",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{inspection_id}}\",\n  \"inspected_at\": \"2026-10-31T09:30:00Z\",\n  \"colony_status\": \"forte\",\n  \"queen_present\": true,\n  \"observations\": \"Couvain compact, réserves correctes.\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Pas de doublon', () => pm.expect(pm.response.json().version).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST inspections - même id sur une autre ruche (409)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-002/inspections",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{inspection_id}}\",\n  \"inspected_at\": \"2026-10-31T09:30:00Z\",\n  \"colony_status\": \"forte\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(409); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST inspections - colony_status invalide (400)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/inspections",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{$guid}}\",\n  \"inspected_at\": \"2026-10-31T09:30:00Z\",\n  \"colony_status\": \"excellente\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST inspections - id qui n'est pas un UUID (400)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/inspections",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"123\",\n  \"inspected_at\": \"2026-10-31T09:30:00Z\",\n  \"colony_status\": \"forte\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST inspections - ruche inconnue (404)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/XX-NOPE-999/inspections",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{$guid}}\",\n  \"inspected_at\": \"2026-10-31T09:30:00Z\",\n  \"colony_status\": \"forte\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(404); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/hives/:id/inspections",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/inspections"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Contient l\\'inspection créée', () => pm.expect(pm.response.json().map((i) => i.id)).to.include(pm.collectionVariables.get('inspection_id')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET inspections - ruche inconnue (404)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives/XX-NOPE-999/inspections"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(404); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     },
     {
-      "name": "GET /api/hives/:id",
-      "request": { "method": "GET", "url": "{{base_url}}/api/hives/SN-CASA-001" },
-      "event": [{ "listen": "test", "script": { "exec": [
-        "pm.test('200', () => pm.response.to.have.status(200));",
-        "pm.test('Bonne ruche', () => pm.expect(pm.response.json().id).to.eql('SN-CASA-001'));"
-      ] } }]
-    },
-    {
-      "name": "GET /api/hives/:id - ruche inconnue (404)",
-      "request": { "method": "GET", "url": "{{base_url}}/api/hives/XX-NOPE-999" },
-      "event": [{ "listen": "test", "script": { "exec": [
-        "pm.test('404', () => pm.response.to.have.status(404));"
-      ] } }]
-    },
-    {
-      "name": "POST /api/hives/:id/measures",
-      "request": {
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "url": "{{base_url}}/api/hives/SN-CASA-001/measures",
-        "body": { "mode": "raw", "raw": "{\n  \"hive_id\": \"SN-CASA-001\",\n  \"site_id\": \"SN-CASA\",\n  \"timestamp\": \"2026-10-31T10:00:00Z\",\n  \"position_lat\": 12.5743,\n  \"position_lon\": -16.2873,\n  \"weight_kg\": 36.84,\n  \"temp_internal_c\": 34.4,\n  \"temp_external_c\": 27.1,\n  \"humidity_pct\": 64,\n  \"acoustic_activity_score\": 0.42,\n  \"battery_pct\": 88\n}" }
-      },
-      "event": [{ "listen": "test", "script": { "exec": [
-        "pm.test('201', () => pm.response.to.have.status(201));",
-        "pm.test('Timestamp de la trame conservé', () => pm.expect(pm.response.json().timestamp).to.eql('2026-10-31T10:00:00Z'));"
-      ] } }]
-    },
-    {
-      "name": "POST /api/hives/:id/measures - sans timestamp (400)",
-      "request": {
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "url": "{{base_url}}/api/hives/SN-CASA-001/measures",
-        "body": { "mode": "raw", "raw": "{\n  \"weight_kg\": 36.84\n}" }
-      },
-      "event": [{ "listen": "test", "script": { "exec": [
-        "pm.test('400', () => pm.response.to.have.status(400));"
-      ] } }]
-    },
-    {
-      "name": "POST /api/hives/:id/measures - hive_id différent du chemin (400)",
-      "request": {
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "url": "{{base_url}}/api/hives/SN-CASA-002/measures",
-        "body": { "mode": "raw", "raw": "{\n  \"hive_id\": \"SN-CASA-001\",\n  \"timestamp\": \"2026-10-31T10:00:00Z\",\n  \"weight_kg\": 36.84\n}" }
-      },
-      "event": [{ "listen": "test", "script": { "exec": [
-        "pm.test('400', () => pm.response.to.have.status(400));"
-      ] } }]
-    },
-    {
-      "name": "POST /api/hives/:id/measures - ruche inconnue (404)",
-      "request": {
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "url": "{{base_url}}/api/hives/XX-NOPE-999/measures",
-        "body": { "mode": "raw", "raw": "{\n  \"timestamp\": \"2026-10-31T10:00:00Z\",\n  \"weight_kg\": 36.84\n}" }
-      },
-      "event": [{ "listen": "test", "script": { "exec": [
-        "pm.test('404', () => pm.response.to.have.status(404));"
-      ] } }]
+      "name": "Erreurs génériques",
+      "item": [
+        {
+          "name": "Route inconnue (404)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/nope"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(404); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "JSON mal formé (400)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"timestamp\": "
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }
