@@ -1,5 +1,25 @@
 # Queen Bee — API Backend Node.js
 
+## Démarrage
+
+```bash
+npm install
+npm run dev          # http://localhost:3000
+```
+
+Collection de requêtes Postman : `postman/queenbee-api.postman_collection.json`.
+
+## TP 2 — Journalisation
+
+Deux journaux comparés sur les mêmes requêtes :
+
+```
+requestLogger : 2026-11-19T11:04:21.588Z GET /api/hives/XX-NOPE-999 404 0.9 ms
+morgan("dev") : GET /x/1?a=b 404 0.688 ms - 2
+```
+
+`morgan("dev")` est coloré selon le code de statut et donne la taille de la réponse, mais n'affiche pas la date. Notre `requestLogger` donne la date complète, utile pour retrouver une requête dans le temps, et nous apprend le fonctionnement d'un intergiciel (`res.on("finish")`). **Nous gardons `requestLogger`.**
+
 ## TP 1 — Lire les mesures sans bloquer
 
 Routes écrites dans `tp/tp1-lecture/serveur-depart.js` :
