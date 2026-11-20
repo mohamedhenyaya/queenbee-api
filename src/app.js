@@ -20,7 +20,8 @@ export function createApp({ hivesRepository, measuresRepository, inspectionsRepo
   // Journal en premier, pour voir toutes les requêtes, y compris celles en erreur.
   app.use(requestLogger);
   // Lit le corps JSON des requêtes : doit être déclaré avant les routes.
-  app.use(express.json());
+  // Au-delà de 1 Mo, la requête est refusée (413) avant d'atteindre une route.
+  app.use(express.json({ limit: "1mb" }));
 
   app.get("/health", (req, res) => {
     res.json({ status: "ok" });

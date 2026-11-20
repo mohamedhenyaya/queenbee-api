@@ -1,8 +1,8 @@
 import { ValidationError, ConflictError } from "../errors.js";
-import { isIsoDate, UUID } from "./validation.js";
 
-const COLONY_STATUSES = ["forte", "normale", "faible", "morte"];
-
+// Les champs, leurs types, l'UUID, la date et l'état de la colonie sont vérifiés par
+// inspectionSchema (src/validators/schemas.js). Le service ne garde que les règles
+// qui ont besoin de la ruche.
 export function createInspectionsService({ hivesService, inspectionsRepository }) {
   return {
     async list(hiveId) {
@@ -12,26 +12,11 @@ export function createInspectionsService({ hivesService, inspectionsRepository }
 
     // Enregistre une inspection dont l'id (UUID) est choisi par l'application mobile.
     // Renvoie { inspection, created } : created vaut false si la synchronisation est rejouée.
-    async add(hiveId, body = {}) {
+    async add(hiveId, body) {
       const hive = await hivesService.get(hiveId);
 
-      for (const champ of ["id", "inspected_at", "colony_status"]) {
-        if (body[champ] === undefined) throw new ValidationError(`Le champ ${champ} est obligatoire.`);
-      }
-      if (typeof body.id !== "string" || !UUID.test(body.id)) {
-        throw new ValidationError("Le champ id doit être un UUID.");
-      }
-      if (!isIsoDate(body.inspected_at)) {
-        throw new ValidationError("Le champ inspected_at doit être une date ISO 8601, par exemple 2026-10-31T09:30:00Z.");
-      }
-      if (!COLONY_STATUSES.includes(body.colony_status)) {
-        throw new ValidationError("Le champ colony_status doit valoir forte, normale, faible ou morte.");
-      }
-      if (body.queen_present != null && typeof body.queen_present !== "boolean") {
-        throw new ValidationError("Le champ queen_present doit être un booléen.");
-      }
-      if (body.observations != null && typeof body.observations !== "string") {
-        throw new ValidationError("Le champ observations doit être un texte.");
+      if (body.hive_id !== undefined && body.hive_id !== hive.id) {
+        throw new ValidationError(`Le hive_id du corps (${body.hive_id}) ne correspond pas à la ruche ${hive.id}.`);
       }
 
       // Synchronisation rejouée : même id déjà reçu pour cette ruche -> on renvoie l'existante.

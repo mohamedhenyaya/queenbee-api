@@ -1,42 +1,62 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createMeasuresService } from "../src/services/measures.service.js";
-import { ValidationError } from "../src/errors.js";
+import { NotFoundError, ValidationError } from "../src/errors.js";
 
-test("refuse un poids hors de sa plage physique", async () => {
-  // Préparer : un faux repository qui garde ce qu'on lui donne, injecté dans le service
-  const enregistrees = [];
-  const measuresRepository = {
+// Les plages et les types sont testés sur les schémas (validators.test.js).
+// Ici, seulement ce qui a besoin du contexte : la ruche.
+
+const validMeasure = { timestamp: "2026-10-31T10:00:00Z", weight_kg: 36.84 };
+
+// Faux service des ruches : seule SN-CASA-001 et SN-CASA-002 existent.
+const fakeHivesService = {
+  async get(id) {
+    if (!["SN-CASA-001", "SN-CASA-002"].includes(id)) {
+      throw new NotFoundError(`Aucune ruche ne porte l'identifiant ${id}.`);
+    }
+    return { id, site_id: "SN-CASA", status: "active" };
+  },
+};
+
+// Faux repository qui garde ce qu'on lui donne.
+function createFakeMeasuresRepository() {
+  const added = [];
+  return {
+    added,
     async insert(measure) {
-      enregistrees.push(measure);
+      added.push(measure);
       return measure;
     },
   };
-  const hivesService = {
-    async get(id) {
-      return { id, site_id: "SN-CASA", status: "active" };
-    },
-  };
-  const service = createMeasuresService({ hivesService, measuresRepository });
+}
 
-  // Agir : ajouter une mesure de 500 kg
-  const ajout = service.add("SN-CASA-001", { timestamp: "2026-10-31T10:00:00Z", weight_kg: 500 });
+test("enregistre une mesure valide, rattachée à la ruche du chemin", async () => {
+  const measuresRepository = createFakeMeasuresRepository();
+  const service = createMeasuresService({ hivesService: fakeHivesService, measuresRepository });
 
-  // Vérifier : une ValidationError est levée (assert.rejects), et rien n'est enregistré
-  await assert.rejects(ajout, ValidationError);
-  assert.equal(enregistrees.length, 0);
+  const mesure = await service.add("SN-CASA-001", validMeasure);
+
+  assert.equal(measuresRepository.added.length, 1);
+  assert.equal(mesure.hive_id, "SN-CASA-001");
+  assert.equal(mesure.site_id, "SN-CASA");
+  assert.equal(mesure.timestamp, "2026-10-31T10:00:00Z");
 });
 
-test("accepte un poids dans sa plage physique", async () => {
-  const enregistrees = [];
-  const service = createMeasuresService({
-    hivesService: { get: async (id) => ({ id, site_id: "SN-CASA", status: "active" }) },
-    measuresRepository: { insert: async (m) => (enregistrees.push(m), m) },
-  });
+test("refuse une mesure pour une ruche inconnue", async () => {
+  const measuresRepository = createFakeMeasuresRepository();
+  const service = createMeasuresService({ hivesService: fakeHivesService, measuresRepository });
 
-  const mesure = await service.add("SN-CASA-001", { timestamp: "2026-10-31T10:00:00Z", weight_kg: 36.84 });
+  await assert.rejects(service.add("XX-NOPE-999", validMeasure), NotFoundError);
+  assert.equal(measuresRepository.added.length, 0);
+});
 
-  assert.equal(enregistrees.length, 1);
-  assert.equal(mesure.hive_id, "SN-CASA-001");
-  assert.equal(mesure.timestamp, "2026-10-31T10:00:00Z");
+test("refuse une trame qui désigne une autre ruche que le chemin", async () => {
+  const measuresRepository = createFakeMeasuresRepository();
+  const service = createMeasuresService({ hivesService: fakeHivesService, measuresRepository });
+
+  await assert.rejects(
+    service.add("SN-CASA-001", { ...validMeasure, hive_id: "SN-CASA-002" }),
+    ValidationError,
+  );
+  assert.equal(measuresRepository.added.length, 0); // rien n'a été enregistré
 });

@@ -16,6 +16,10 @@
     {
       "key": "page0",
       "value": ""
+    },
+    {
+      "key": "measure_ts",
+      "value": ""
     }
   ],
   "item": [
@@ -77,6 +81,24 @@
           ]
         },
         {
+          "name": "GET /api/hives?site_id=… injection SQL (liste vide)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/hives?site_id=SN-CASA' OR '1'='1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Liste vide : la valeur est restée une valeur', () => pm.expect(pm.response.json()).to.eql([]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "GET /api/hives/:id",
           "request": {
             "method": "GET",
@@ -131,7 +153,44 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"hive_id\": \"SN-CASA-001\",\n  \"site_id\": \"SN-CASA\",\n  \"timestamp\": \"2026-11-01T10:00:00Z\",\n  \"position_lat\": 12.5743,\n  \"position_lon\": -16.2873,\n  \"weight_kg\": 36.84,\n  \"temp_internal_c\": 34.4,\n  \"temp_external_c\": 27.1,\n  \"humidity_pct\": 64,\n  \"acoustic_activity_score\": 0.42,\n  \"battery_pct\": 88\n}"
+              "raw": "{\n  \"hive_id\": \"SN-CASA-001\",\n  \"site_id\": \"SN-CASA\",\n  \"timestamp\": \"{{measure_ts}}\",\n  \"position_lat\": 12.5743,\n  \"position_lon\": -16.2873,\n  \"weight_kg\": 36.84,\n  \"temp_internal_c\": 34.4,\n  \"temp_external_c\": 27.1,\n  \"humidity_pct\": 64,\n  \"acoustic_activity_score\": 0.42,\n  \"battery_pct\": 88\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Un instant neuf à chaque envoi : la base refuse deux mesures de la même ruche au même instant.",
+                  "pm.collectionVariables.set('measure_ts', new Date(Date.UTC(2026, 10, 1) + Math.floor(Math.random() * 1e9) * 1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Timestamp de la trame conservé', () => pm.expect(Date.parse(pm.response.json().timestamp)).to.eql(Date.parse(pm.collectionVariables.get('measure_ts'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST measures - même mesure une seconde fois (409)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hive_id\": \"SN-CASA-001\",\n  \"site_id\": \"SN-CASA\",\n  \"timestamp\": \"{{measure_ts}}\",\n  \"position_lat\": 12.5743,\n  \"position_lon\": -16.2873,\n  \"weight_kg\": 36.84,\n  \"temp_internal_c\": 34.4,\n  \"temp_external_c\": 27.1,\n  \"humidity_pct\": 64,\n  \"acoustic_activity_score\": 0.42,\n  \"battery_pct\": 88\n}"
             }
           },
           "event": [
@@ -139,8 +198,91 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Statut 201', () => pm.response.to.have.status(201));",
-                  "pm.test('Timestamp de la trame conservé', () => pm.expect(pm.response.json().timestamp).to.eql('2026-11-01T10:00:00Z'));"
+                  "pm.test('Statut 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(409); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });",
+                  "pm.test('detail', () => pm.expect(pm.response.json().detail).to.eql(\"Cette ressource existe déjà.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST measures - sans corps (400)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });",
+                  "pm.test('detail', () => pm.expect(pm.response.json().detail).to.eql(\"timestamp est obligatoire. weight_kg est obligatoire.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST measures - deux champs hors plage (400)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"timestamp\": \"2026-11-06T08:00:00Z\",\n  \"weight_kg\": 500,\n  \"humidity_pct\": 120\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });",
+                  "pm.test('detail', () => pm.expect(pm.response.json().detail).to.eql(\"weight_kg doit être inférieur ou égal à 150. humidity_pct doit être inférieur ou égal à 100.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST measures - JSON mal formé (400)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/measures",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"timestamp\": "
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });",
+                  "pm.test('detail', () => pm.expect(pm.response.json().detail).to.eql(\"Le corps de la requête n'est pas un JSON valide.\"));"
                 ]
               }
             }
@@ -277,7 +419,8 @@
                   "const r = pm.response.json();",
                   "pm.test('limit 50 et offset 0 par défaut', () => { pm.expect(r.limit).to.eql(50); pm.expect(r.offset).to.eql(0); pm.expect(r.items.length).to.be.at.most(50); });",
                   "pm.test('De la plus récente à la plus ancienne', () => r.items.forEach((m, i) => i && pm.expect(Date.parse(r.items[i - 1].timestamp)).to.be.at.least(Date.parse(m.timestamp))));",
-                  "pm.collectionVariables.set('page0', JSON.stringify(r.items.map((m) => m.timestamp)));"
+                  "pm.collectionVariables.set('page0', JSON.stringify(r.items.map((m) => m.timestamp)));",
+                  "pm.test('50 mesures par défaut, limit 50, offset 0', () => { const p = pm.response.json(); pm.expect(p.items.length).to.eql(50); pm.expect(p.limit).to.eql(50); pm.expect(p.offset).to.eql(0); });"
                 ]
               }
             }
@@ -352,7 +495,8 @@
                 "exec": [
                   "pm.test('Statut 400', () => pm.response.to.have.status(400));",
                   "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
-                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });",
+                  "pm.test('detail', () => pm.expect(pm.response.json().detail).to.eql(\"limit doit être un nombre.\"));"
                 ]
               }
             }
@@ -548,6 +692,66 @@
                   "pm.test('Statut 400', () => pm.response.to.have.status(400));",
                   "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
                   "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST inspections - author_id glissé (400)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/inspections",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{$guid}}\",\n  \"inspected_at\": \"2026-11-01T09:00:00Z\",\n  \"colony_status\": \"forte\",\n  \"author_id\": \"x\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });",
+                  "pm.test('detail', () => pm.expect(pm.response.json().detail).to.eql(\"author_id n'est pas un champ autorisé.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST inspections - datée dans le futur (400)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/hives/SN-CASA-001/inspections",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{$guid}}\",\n  \"inspected_at\": \"2099-01-01T00:00:00Z\",\n  \"colony_status\": \"forte\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Content-Type application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "pm.test('Format RFC 9457', () => { const p = pm.response.json(); pm.expect(p.type).to.eql('about:blank'); pm.expect(p.status).to.eql(400); pm.expect(p.title).to.be.a('string'); pm.expect(p.detail).to.be.a('string'); });",
+                  "pm.test('detail', () => pm.expect(pm.response.json().detail).to.eql(\"inspected_at ne peut pas être dans le futur.\"));"
                 ]
               }
             }

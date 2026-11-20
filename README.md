@@ -34,19 +34,53 @@ src/
   server.js           choisit le stockage (STORAGE), crée les repositories, appelle createApp, puis listen
   app.js              createApp(repositories) : branche services, contrôleur, routeur
   config.js           lit PORT, NODE_ENV, STORAGE et DB_*
-  errors.js           NotFoundError, ValidationError, ConflictError
-  routes/hives/       URL + verbe -> méthode du contrôleur
-  controllers/        lit la requête, choisit le code HTTP
-  services/           règles métier (validation, plages physiques)
+  errors.js           AppError et ses sous-classes NotFoundError, ValidationError, ConflictError
+  routes/hives/       URL + verbe -> validate(schéma) -> méthode du contrôleur
+  validators/         schémas Joi et messages en français
+  controllers/        lit req.validated, choisit le code HTTP
+  services/           règles métier qui ont besoin des données (la ruche existe, hive_id cohérent)
   repositories/       memory/ (en mémoire) et postgres/ (PostgreSQL), mêmes méthodes
-  middlewares/        requestLogger, notFoundHandler, errorHandler
+  middlewares/        requestLogger, validate, notFoundHandler, errorHandler
   utils/problem.js    sendProblem, format d'erreur RFC 9457
-test/                 tests des services avec de faux repositories
+test/                 tests des services (faux repositories) et des schémas (sans serveur)
 ```
 
 Chaque service est une fabrique qui reçoit ses dépendances (`createMeasuresService({ hivesService, measuresRepository })`) et n'importe jamais de repository. Aucun contrôleur n'importe de repository : seuls les repositories changeront au jour 2 (PostgreSQL).
 
 Au démarrage, l'API charge 5 ruches et les mesures du 31 octobre des ruches SN-CASA (fichier `data/mesures-SN-CASA-2026-10-31.ndjson`). Les données sont perdues à chaque redémarrage.
+
+## TP 6 — Validation et erreurs
+
+Toute entrée passe par un schéma Joi avant d'atteindre un contrôleur ; toute erreur passe par un seul intergiciel.
+
+```
+src/
+  errors.js                  AppError (porte le code HTTP) : ValidationError 400, NotFoundError 404, ConflictError 409
+  validators/schemas.js      hivesQuerySchema, paginationSchema, measureSchema, inspectionSchema
+  validators/messages.js     messages de Joi en français (kit du jour 2)
+  middlewares/validate.js    validate(schema, "body" | "query") : range le résultat converti dans req.validated
+  middlewares/errorHandler.js  AppError, JSON mal formé (400), corps > 1 Mo (413), erreurs PostgreSQL, 500
+```
+
+- Le routeur place `validate` avant chaque contrôleur ; les contrôleurs lisent `req.validated` et n'ont aucun `try/catch` (Express 5 transmet les promesses rejetées à `errorHandler`).
+- Les services ne vérifient plus que ce qui a besoin de la ruche : elle existe, et le `hive_id` du corps est celui du chemin (mesures et inspections). `src/services/validation.js` est supprimé.
+- Erreurs PostgreSQL : `23505` (doublon) devient 409 « Cette ressource existe déjà. » ; `23503`, `23514` et `22P02` deviennent 400 avec un message générique. Le message de PostgreSQL ne va jamais dans la réponse, car il cite des tables et des contraintes.
+- Un champ non déclaré est refusé : un client ne peut pas envoyer d'`author_id` dans une inspection.
+- Tests : `test/validators.test.js` teste les schémas à travers `validate`, sans serveur (15 tests). `test/measures.service.test.js` garde ce qui a besoin du contexte : la ruche inconnue et le `hive_id` différent du chemin. `npm test` : 18 tests sur 18 passent.
+- Le contrat [docs/api.md](docs/api.md) et la collection Postman sont à jour. La collection a 6 requêtes de plus (doublon 409, corps vide, deux champs hors plage, JSON mal formé, `author_id`, date future, injection SQL), et la mesure valide prend un instant neuf à chaque Run pour éviter un 409.
+
+Vérifications de l'énoncé, faites sur PostgreSQL :
+
+| Requête | Résultat |
+| ------- | -------- |
+| Mesure avec `weight_kg: 500` et `humidity_pct: 120` | 400 « weight_kg doit être inférieur ou égal à 150. humidity_pct doit être inférieur ou égal à 100. » |
+| Mesure sans corps | 400 « timestamp est obligatoire. weight_kg est obligatoire. » |
+| `?limit=abc` / sans `limit` | 400 « limit doit être un nombre. » / 200 avec 50 mesures, `limit` 50, `offset` 0 |
+| La même mesure valide deux fois | 201, puis 409 « Cette ressource existe déjà. » |
+| Inspection avec `author_id` | 400 « author_id n'est pas un champ autorisé. » |
+| Inspection datée de 2099 | 400 « inspected_at ne peut pas être dans le futur. » |
+| JSON mal formé / corps de plus de 1 Mo | 400 / 413 |
+| `try {` dans `src/controllers` | aucun résultat |
 
 ## TP 5 — Brancher PostgreSQL
 

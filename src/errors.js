@@ -1,14 +1,21 @@
-// Erreurs métier : levées par les services, traduites en codes HTTP par errorHandler.
-// Les services ne connaissent pas HTTP ; seul l'intergiciel d'erreur choisit le code.
-
-export class NotFoundError extends Error {
-  name = "NotFoundError";
+// Erreurs typées : levées par les services ou par validate, traduites en réponses par errorHandler.
+// La classe mère porte le code HTTP ; chaque sous-classe nomme un cas.
+export class AppError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = this.constructor.name; // « NotFoundError », « ValidationError »…
+    this.status = status;
+  }
 }
 
-export class ValidationError extends Error {
-  name = "ValidationError";
+export class ValidationError extends AppError {
+  constructor(message) { super(message, 400); }
 }
 
-export class ConflictError extends Error {
-  name = "ConflictError";
+export class NotFoundError extends AppError {
+  constructor(message) { super(message, 404); }
+}
+
+export class ConflictError extends AppError {
+  constructor(message) { super(message, 409); }
 }

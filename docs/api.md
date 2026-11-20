@@ -13,22 +13,25 @@ Toute erreur est renvoyée avec l'en-tête `Content-Type: application/problem+js
   "type": "about:blank",
   "title": "Requête invalide",
   "status": 400,
-  "detail": "Le paramètre limit doit être un entier compris entre 1 et 500."
+  "detail": "weight_kg doit être inférieur ou égal à 150. humidity_pct doit être inférieur ou égal à 100."
 }
 ```
 
-`title` est l'intitulé du code, identique pour toutes les erreurs de même code ; `detail` explique le cas précis. Une réponse d'erreur ne contient jamais de pile d'exécution.
+`title` est l'intitulé du code, identique pour toutes les erreurs de même code ; `detail` explique le cas précis. Quand une requête contient plusieurs erreurs, `detail` les cite toutes. Une réponse d'erreur ne contient jamais de pile d'exécution ni de SQL.
 
 | Code | `title` |
 | ---- | ------- |
 | 400 | Requête invalide |
 | 404 | Ressource introuvable |
 | 409 | Conflit |
+| 413 | Contenu trop volumineux |
 | 500 | Erreur interne |
 
 Erreurs communes à toutes les routes :
 
 - **400** : le corps n'est pas un JSON valide (`"detail": "Le corps de la requête n'est pas un JSON valide."`).
+- **400** : le corps ou les paramètres de requête contiennent un champ que la route ne prévoit pas (`"detail": "author_id n'est pas un champ autorisé."`).
+- **413** : le corps dépasse 1 Mo (`"detail": "Le corps de la requête dépasse la taille maximale de 1 Mo."`).
 - **404** : aucune route ne correspond au verbe et au chemin (`"detail": "Aucune route ne correspond à GET /api/nope."`).
 - **500** : erreur inattendue du serveur (`"detail": "Une erreur interne est survenue."`).
 
@@ -112,8 +115,10 @@ Corps :
 | `site_id` | texte | non ; remplacé par le site de la ruche |
 | `position_lat`, `position_lon` | nombre | non |
 | `temp_internal_c`, `temp_external_c` | nombre | non |
-| `humidity_pct`, `battery_pct` | nombre | non |
+| `humidity_pct`, `battery_pct` | entier | non |
 | `acoustic_activity_score` | nombre | non |
+
+Les champs facultatifs peuvent valoir `null`.
 
 ```json
 {
@@ -137,7 +142,7 @@ Corps :
 
 - `timestamp` ou `weight_kg` manque ;
 - `timestamp` n'est pas une date ISO 8601 valide ;
-- un champ numérique n'est pas un nombre ;
+- un champ numérique n'est pas un nombre, ou `humidity_pct` / `battery_pct` n'est pas un entier ;
 - un champ numérique sort de sa plage physique (UC-CY02, bornes incluses) :
 
   | Champ | Min | Max |
@@ -151,7 +156,7 @@ Corps :
   | `acoustic_activity_score` | 0 | 1 |
   | `battery_pct` | 0 | 100 |
 
-  Exemple : `"detail": "Le champ weight_kg doit être compris entre 0 et 150 (reçu : 500)."` ;
+  Exemple : `"detail": "weight_kg doit être inférieur ou égal à 150."` ;
 - `hive_id` est présent mais différent de `:id`.
 
 Dans ce cas, rien n'est enregistré.
@@ -161,11 +166,13 @@ Dans ce cas, rien n'est enregistré.
   "type": "about:blank",
   "title": "Requête invalide",
   "status": 400,
-  "detail": "Les champs timestamp et weight_kg sont obligatoires."
+  "detail": "timestamp est obligatoire. weight_kg est obligatoire."
 }
 ```
 
 **404** : aucune ruche ne porte cet identifiant.
+
+**409** : une mesure existe déjà pour cette ruche à ce `timestamp` (`"detail": "Cette ressource existe déjà."`).
 
 ---
 
@@ -194,14 +201,14 @@ Un paramètre présent doit être valide : `?limit=` (vide), `?limit=abc`, `?lim
 
 `items` est vide si `offset` dépasse le nombre de mesures.
 
-**400** : `limit` ou `offset` invalide.
+**400** : `limit` ou `offset` invalide, ou paramètre inconnu.
 
 ```json
 {
   "type": "about:blank",
   "title": "Requête invalide",
   "status": 400,
-  "detail": "Le paramètre limit doit être un entier compris entre 1 et 500."
+  "detail": "limit doit être un nombre."
 }
 ```
 
@@ -248,8 +255,11 @@ Corps :
 | `id` | UUID | oui |
 | `inspected_at` | date ISO 8601 | oui |
 | `colony_status` | `forte`, `normale`, `faible` ou `morte` | oui |
+| `hive_id` | texte | non ; s'il est présent, il doit être égal à `:id` |
 | `queen_present` | booléen | non, `null` par défaut |
-| `observations` | texte | non, `null` par défaut |
+| `observations` | texte de 2 000 caractères au plus | non, `null` par défaut |
+
+Tout autre champ est refusé : l'auteur (`author_id`) n'est jamais choisi par le client.
 
 ```json
 {
@@ -269,16 +279,18 @@ Corps :
 
 - un champ obligatoire manque ;
 - `id` n'est pas un UUID ;
-- `inspected_at` n'est pas une date ISO 8601 valide ;
+- `inspected_at` n'est pas une date ISO 8601 valide, ou est dans le futur ;
 - `colony_status` n'est pas une des quatre valeurs ;
-- `queen_present` n'est pas un booléen, ou `observations` n'est pas un texte.
+- `queen_present` n'est pas un booléen, ou `observations` n'est pas un texte ou dépasse 2 000 caractères ;
+- un champ non prévu est présent (par exemple `author_id`) ;
+- `hive_id` est présent mais différent de `:id`.
 
 ```json
 {
   "type": "about:blank",
   "title": "Requête invalide",
   "status": 400,
-  "detail": "Le champ colony_status doit valoir forte, normale, faible ou morte."
+  "detail": "inspected_at ne peut pas être dans le futur."
 }
 ```
 
