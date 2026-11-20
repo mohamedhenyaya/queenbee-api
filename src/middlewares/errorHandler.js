@@ -18,7 +18,16 @@ export function notFoundHandler(req, res) {
 // eslint-disable-next-line no-unused-vars
 export function errorHandler(err, req, res, next) {
   // Erreurs de l'application : leur message est écrit pour le client.
-  if (err instanceof AppError) return sendProblem(res, err.status, err.message);
+  if (err instanceof AppError) {
+    // Journal des requêtes interdites : chaque refus laisse une trace côté serveur.
+    if (err.status === 401 || err.status === 403) {
+      console.warn(`[accès refusé] ${err.status} ${req.method} ${req.originalUrl} ip=${req.ip} utilisateur=${req.user?.id ?? "-"}`);
+    }
+    if (err.status === 401) {
+      res.set("WWW-Authenticate", 'Bearer realm="queenbee"'); // schéma attendu (RFC 6750)
+    }
+    return sendProblem(res, err.status, err.message);
+  }
 
   // Erreurs de express.json()
   if (err.type === "entity.parse.failed") {

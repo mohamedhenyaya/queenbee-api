@@ -4,6 +4,36 @@ import Joi from "joi";
 // par exemple, un author_id dans une inspection.
 
 export const COLONY_STATUSES = ["forte", "normale", "faible", "morte"];
+export const ROLES = ["apiculteur", "coordinateur", "gestionnaire", "admin"];
+
+// --- Authentification
+
+// tlds: { allow: false } : sinon les adresses en .test du jeu de données seraient refusées.
+const email = Joi.string().email({ tlds: { allow: false } }).max(254);
+
+export const loginSchema = Joi.object({
+  email: email.required(),
+  password: Joi.string().required(),
+});
+
+export const refreshSchema = Joi.object({
+  refresh_token: Joi.string().required(),
+});
+
+// site_id est lié au rôle : obligatoire pour apiculteur et coordinateur, interdit sinon
+// (gestionnaire et admin voient tous les sites).
+export const registerSchema = Joi.object({
+  email: email.required(),
+  password: Joi.string().min(12).max(72).required(), // bcrypt ignore tout au-delà de 72 octets
+  role: Joi.string().valid(...ROLES).required(),
+  site_id: Joi.when("role", {
+    is: Joi.valid("apiculteur", "coordinateur"),
+    then: Joi.string().required(),
+    otherwise: Joi.forbidden(),
+  }),
+});
+
+// --- Ruches, mesures, inspections
 
 // GET /api/hives?site_id=… ; une chaîne vide est traitée comme l'absence de filtre.
 export const hivesQuerySchema = Joi.object({

@@ -1,5 +1,5 @@
-// Repository des inspections, en PostgreSQL. Mêmes méthodes que la version en mémoire.
-const CHAMPS = `id, hive_id, inspected_at, colony_status, queen_present, observations,
+// Repository des inspections, en PostgreSQL.
+const CHAMPS = `id, hive_id, author_id, inspected_at, colony_status, queen_present, observations,
   version, created_at, updated_at`;
 
 export function createPostgresInspectionsRepository(pool) {
@@ -17,17 +17,17 @@ export function createPostgresInspectionsRepository(pool) {
       return rows;
     },
 
-    // author_id est obligatoire, mais l'authentification n'arrive qu'au TP 7 :
-    // en attendant, l'auteur est le propriétaire de la ruche.
+    // L'auteur est l'utilisateur connecté (author_id), jamais une valeur envoyée par le client.
     async insert(inspection) {
       const { rows } = await pool.query(
         `INSERT INTO inspections (id, hive_id, author_id, inspected_at, colony_status,
                                   queen_present, observations)
-         VALUES ($1, $2, (SELECT owner_id FROM hives WHERE id = $2), $3, $4, $5, $6)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING ${CHAMPS}`,
         [
           inspection.id,
           inspection.hive_id,
+          inspection.author_id,
           inspection.inspected_at,
           inspection.colony_status,
           inspection.queen_present ?? null,

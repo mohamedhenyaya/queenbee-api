@@ -18,36 +18,101 @@ Ce qui manque :
 
 ```bash
 npm install
-cp .env.example .env   # puis remplacer les fausses valeurs
+cp .env.example .env   # puis remplacer les fausses valeurs (mot de passe de la base, secrets JWT)
+docker compose up -d   # la base PostgreSQL (voir db/README.md)
 npm run dev            # http://localhost:3000, recharge à chaque modification
 npm test               # tests node:test
 ```
 
 - Contrat de l'API : [docs/api.md](docs/api.md).
-- Collection Postman : `postman/queenbee-api.postman_collection.json` (Import, puis Run dans l'ordre).
-- Configuration (`.env`) : `PORT` (1 à 65535, 3000 par défaut) et `NODE_ENV` (`development`, `production` ou `test`). Une valeur invalide arrête le démarrage avec un message.
+- Collection Postman : `postman/queenbee-api.postman_collection.json` (Import, puis Run dans l'ordre). Elle se connecte elle-même avec les comptes de démonstration (mot de passe `QueenBee2026!`) et range le jeton dans la variable `token`, vide à l'export.
+- Configuration (`.env`) : `PORT` (1 à 65535, 3000 par défaut), `NODE_ENV` (`development`, `production` ou `test`), `DB_*` (`DB_PASSWORD` obligatoire, `DB_POOL_MAX` 10 par défaut), `JWT_ACCESS_SECRET` et `JWT_REFRESH_SECRET` (obligatoires et différents), `JWT_ACCESS_TTL` (15m par défaut) et `JWT_REFRESH_TTL` (7d par défaut). Une valeur invalide arrête le démarrage avec un message.
 
-## Architecture (TP 4)
+## Architecture
 
 ```
 src/
-  server.js           choisit le stockage (STORAGE), crée les repositories, appelle createApp, puis listen
-  app.js              createApp(repositories) : branche services, contrôleur, routeur
-  config.js           lit PORT, NODE_ENV, STORAGE et DB_*
-  errors.js           AppError et ses sous-classes NotFoundError, ValidationError, ConflictError
-  routes/hives/       URL + verbe -> validate(schéma) -> méthode du contrôleur
+  server.js           crée le pool PostgreSQL et les repositories, appelle createApp, puis listen
+  app.js              createApp(repositories) : branche services, contrôleurs, routeurs
+  config.js           lit PORT, NODE_ENV, DB_* et JWT_*
+  db.js               createPool() : pool pg, NUMERIC converti en nombre
+  errors.js           AppError et ses sous-classes (400, 401, 403, 404, 409)
+  routes/             auth/ et hives/ : URL + verbe -> jeton -> rôle -> validate(schéma) -> contrôleur
   validators/         schémas Joi et messages en français
-  controllers/        lit req.validated, choisit le code HTTP
-  services/           règles métier qui ont besoin des données (la ruche existe, hive_id cohérent)
-  repositories/       memory/ (en mémoire) et postgres/ (PostgreSQL), mêmes méthodes
-  middlewares/        requestLogger, validate, notFoundHandler, errorHandler
+  controllers/        lit req.user et req.validated, choisit le code HTTP
+  services/           règles métier : droits d'accès (canAccessHive), jetons, ruche existante
+  repositories/postgres/  une fabrique par table, requêtes paramétrées
+  middlewares/        requestLogger, auth (requireAuth, requireRole), validate, notFoundHandler, errorHandler
   utils/problem.js    sendProblem, format d'erreur RFC 9457
-test/                 tests des services (faux repositories) et des schémas (sans serveur)
+test/                 tests des services (faux repositories), des schémas et de la configuration, sans serveur ni base
 ```
 
-Chaque service est une fabrique qui reçoit ses dépendances (`createMeasuresService({ hivesService, measuresRepository })`) et n'importe jamais de repository. Aucun contrôleur n'importe de repository : seuls les repositories changeront au jour 2 (PostgreSQL).
+Chaque service est une fabrique qui reçoit ses dépendances (`createMeasuresService({ hivesService, measuresRepository })`) et n'importe jamais de repository. Aucun contrôleur n'importe de repository.
 
-Au démarrage, l'API charge 5 ruches et les mesures du 31 octobre des ruches SN-CASA (fichier `data/mesures-SN-CASA-2026-10-31.ndjson`). Les données sont perdues à chaque redémarrage.
+## TP 7 — Authentification et autorisation
+
+Chaque requête vers `/api/hives` porte un jeton d'accès JWT (`Authorization: Bearer <jeton>`), et l'API vérifie ce que son utilisateur a le droit de voir et de faire. Le stockage en mémoire est supprimé : l'API a besoin de la table `users` (les repositories en mémoire restent dans le tag `jour1-fin`).
+
+```
+src/
+  services/auth.service.js           login, refresh, register, verifyAccessToken (bcryptjs, jsonwebtoken)
+  repositories/postgres/users.repository.js   seule findByEmail lit password_hash
+  middlewares/auth.js                createRequireAuth(authService) -> req.user ; requireRole(...roles)
+  controllers/auth.controller.js, routes/auth/auth.router.js   /api/auth/login, refresh, register, me
+  services/hives.service.js          canAccessHive(user, hive), listHives(user, …), getHive(user, id)
+```
+
+| Rôle | Ruches visibles | Peut envoyer |
+| ---- | --------------- | ------------ |
+| admin | toutes | des mesures (il simule la passerelle), des comptes |
+| gestionnaire | toutes | rien |
+| coordinateur | celles de son site | des inspections |
+| apiculteur | les siennes (`owner_id`) | des inspections |
+
+- **Jetons.** Le jeton d'accès dure 15 minutes et le jeton de renouvellement 7 jours. Ils sont signés avec deux secrets différents et portent un champ `type` : l'un ne passe jamais pour l'autre. À la vérification, l'algorithme (HS256), l'émetteur et l'audience sont imposés (RFC 8725), donc un jeton `alg: none` est refusé. `refresh` relit l'utilisateur en base, car son rôle a pu changer.
+- **Connexion.** Une adresse inconnue et un mauvais mot de passe donnent le même message, dans le même temps (empreinte factice), pour ne pas révéler quelles adresses existent. Au cinquième échec, le compte est bloqué 15 minutes, même si l'essai suivant est le bon.
+- **Droits.** La règle d'accès n'est écrite qu'une fois, dans `canAccessHive`. Les services des mesures et des inspections passent tous par `getHive(user, id)`, qui vérifie l'existence d'abord (404), puis les droits (403). Les rôles qui peuvent écrire sont contrôlés dans le routeur (`requireRole`).
+- **Auteur d'une inspection.** C'est l'utilisateur du jeton (`user.id`), jamais une valeur du corps. Le `(SELECT owner_id …)` provisoire du TP 5 est supprimé, et `author_id` est renvoyé avec l'inspection.
+- **Création de compte.** Elle est réservée à l'administrateur (UC-AD01). `site_id` est obligatoire pour un apiculteur ou un coordinateur, et interdit pour un gestionnaire ou un admin. L'empreinte du mot de passe n'est jamais renvoyée, et une adresse déjà prise donne 409.
+- **Journal des refus.** Chaque 401 ou 403 laisse dans le terminal une ligne `[accès refusé]` avec la méthode, l'URL, l'IP et l'utilisateur. Un 401 porte l'en-tête `WWW-Authenticate: Bearer realm="queenbee"`.
+- **Tests.** `npm test` passe : 37 tests sur 37.
+  - `hives.service.test.js` : `canAccessHive` rôle par rôle, filtres de `listHives`, 404 avant 403.
+  - `auth.service.test.js` : même message, blocage au cinquième échec, jetons falsifiés, expirés ou `alg: none`, type de jeton.
+  - `config.test.js` : secrets manquants ou identiques.
+  - `validators.test.js` : schémas de connexion et de création de compte.
+- **Collection Postman.** Elle se connecte elle-même (admin, puis api1, puis le coordinateur, puis le gestionnaire), teste le blocage sur un compte créé pour l'occasion avec une adresse neuve à chaque Run, et contient les requêtes interdites ci-dessous. Elle passe en entier deux fois de suite (209 assertions sur 209). Chaque Run laisse en base un compte `test-blocage-…@queenbee.test`.
+
+### Vérifications
+
+| Vérification | Connecté en | Résultat obtenu |
+| ------------ | ----------- | --------------- |
+| `GET /api/hives` sans jeton | personne | 401, en-tête `WWW-Authenticate: Bearer realm="queenbee"` |
+| Mauvais mot de passe, puis adresse inconnue | personne | 401 les deux fois, même `detail` : « Adresse e-mail ou mot de passe incorrect. » |
+| `GET /api/hives` | admin / coord.sn-casa / api1.sn-casa | 400 ruches / 50, toutes de SN-CASA / 10, de SN-CASA-001 à SN-CASA-010 |
+| `GET /api/hives/SN-CASA-011`, puis `XX-NOPE-999` | api1.sn-casa | 403 « Vous n'avez pas accès à la ruche SN-CASA-011. », puis 404 |
+| Inspection sur SN-CASA-001 | api1.sn-casa | 201, `author_id` égal à l'`id` de `/api/auth/me` ; avec `"author_id": "x"` : 400 |
+| Compte créé par `register`, 5 mauvais mots de passe puis le bon | admin, puis personne | 201 ; essais 1 à 4 : « … incorrect. » ; essai 5 et bon mot de passe : « Compte bloqué après 5 échecs de connexion, jusqu'à 11:12 UTC. » |
+| `npm test` | | 37 tests sur 37, dont `canAccessHive : chaque rôle voit ce qu'il doit voir` |
+
+### Journal des requêtes interdites
+
+| Requête interdite | Connecté en | Requête | Attendu | Obtenu |
+| ----------------- | ----------- | ------- | ------- | ------ |
+| Ressource d'un autre site | coord.sn-casa | `GET /api/hives?site_id=CI-AGBO` | 403 | 403 « Vous n'avez pas accès au site CI-AGBO. » |
+| Rôle insuffisant | api1.sn-casa | `POST /api/hives/SN-CASA-001/measures` | 403 | 403 « Action réservée aux rôles suivants : admin. » |
+| Jeton expiré | gestion | `GET /api/hives` 11 s après la connexion, avec `JWT_ACCESS_TTL=10s` | 401 | 401 « Jeton d'accès invalide ou expiré. » |
+| Jeton falsifié | coord.sn-casa | `GET /api/hives`, une lettre changée dans la partie centrale du jeton | 401 | 401 « Jeton d'accès invalide ou expiré. » |
+
+Lignes correspondantes dans le terminal du serveur :
+
+```
+[accès refusé] 403 GET /api/hives?site_id=CI-AGBO ip=::1 utilisateur=bbf57177-bb5c-41a5-8242-28b74588b2f3
+[accès refusé] 403 POST /api/hives/SN-CASA-001/measures ip=::1 utilisateur=3285e783-75a0-4f52-9f1d-00b375602821
+[accès refusé] 401 GET /api/hives ip=::1 utilisateur=-
+[accès refusé] 401 GET /api/hives ip=::1 utilisateur=-
+```
+
+Pour un jeton expiré ou falsifié, l'utilisateur vaut `-` : le jeton est refusé avant que `req.user` existe.
 
 ## TP 6 — Validation et erreurs
 
@@ -66,7 +131,7 @@ src/
 - Les services ne vérifient plus que ce qui a besoin de la ruche : elle existe, et le `hive_id` du corps est celui du chemin (mesures et inspections). `src/services/validation.js` est supprimé.
 - Erreurs PostgreSQL : `23505` (doublon) devient 409 « Cette ressource existe déjà. » ; `23503`, `23514` et `22P02` deviennent 400 avec un message générique. Le message de PostgreSQL ne va jamais dans la réponse, car il cite des tables et des contraintes.
 - Un champ non déclaré est refusé : un client ne peut pas envoyer d'`author_id` dans une inspection.
-- Tests : `test/validators.test.js` teste les schémas à travers `validate`, sans serveur (15 tests). `test/measures.service.test.js` garde ce qui a besoin du contexte : la ruche inconnue et le `hive_id` différent du chemin. `npm test` : 18 tests sur 18 passent.
+- Tests : `test/validators.test.js` teste les schémas à travers `validate`, sans serveur (15 tests au TP 6). `test/measures.service.test.js` garde ce qui a besoin du contexte : la ruche inconnue et le `hive_id` différent du chemin. `npm test` au TP 6 : 18 tests sur 18 passent.
 - Le contrat [docs/api.md](docs/api.md) et la collection Postman sont à jour. La collection a 6 requêtes de plus (doublon 409, corps vide, deux champs hors plage, JSON mal formé, `author_id`, date future, injection SQL), et la mesure valide prend un instant neuf à chaque Run pour éviter un 409.
 
 Vérifications de l'énoncé, faites sur PostgreSQL :
@@ -84,7 +149,7 @@ Vérifications de l'énoncé, faites sur PostgreSQL :
 
 ## TP 5 — Brancher PostgreSQL
 
-`STORAGE=postgres` (par défaut) ou `STORAGE=memory` dans `.env` choisit le stockage. Seuls `config.js`, `server.js`, `db.js` et `repositories/` ont changé : `git diff jour1-fin --stat -- src/services src/controllers src/routes` n'affiche rien.
+`STORAGE=postgres` (par défaut) ou `STORAGE=memory` dans `.env` choisissait le stockage, jusqu'au TP 7 qui a supprimé le mode mémoire. Seuls `config.js`, `server.js`, `db.js` et `repositories/` ont changé : `git diff jour1-fin --stat -- src/services src/controllers src/routes` n'affichait rien au commit du TP 5.
 
 ```
 src/

@@ -22,6 +22,8 @@ Toute erreur est renvoyée avec l'en-tête `Content-Type: application/problem+js
 | Code | `title` |
 | ---- | ------- |
 | 400 | Requête invalide |
+| 401 | Authentification requise |
+| 403 | Accès refusé |
 | 404 | Ressource introuvable |
 | 409 | Conflit |
 | 413 | Contenu trop volumineux |
@@ -35,15 +37,113 @@ Erreurs communes à toutes les routes :
 - **404** : aucune route ne correspond au verbe et au chemin (`"detail": "Aucune route ne correspond à GET /api/nope."`).
 - **500** : erreur inattendue du serveur (`"detail": "Une erreur interne est survenue."`).
 
+## Authentification et droits
+
+Toutes les routes `/api/hives…` et `GET /api/auth/me` demandent un jeton d'accès, obtenu par `POST /api/auth/login` :
+
+```
+Authorization: Bearer <access_token>
+```
+
+Le jeton d'accès dure 15 minutes ; `POST /api/auth/refresh` en donne un nouveau à partir du jeton de renouvellement (7 jours).
+
+- **401** : jeton absent, invalide, falsifié ou expiré. La réponse porte l'en-tête `WWW-Authenticate: Bearer realm="queenbee"`.
+  - `"detail": "Jeton d'accès manquant : ajoutez l'en-tête Authorization: Bearer <jeton>."`
+  - `"detail": "Jeton d'accès invalide ou expiré."`
+- **403** : jeton valide, mais l'utilisateur n'a pas le droit.
+
+| Rôle | Ruches visibles | Peut envoyer |
+| ---- | --------------- | ------------ |
+| `admin` | toutes | des mesures (il simule la passerelle), des comptes |
+| `gestionnaire` | toutes | rien |
+| `coordinateur` | celles de son site | des inspections |
+| `apiculteur` | les siennes (`owner_id`) | des inspections |
+
+Envoyer avec un rôle qui n'en a pas le droit : **403** `"Action réservée aux rôles suivants : admin."`.
+
 ## Paramètre de chemin commun
 
-- `id` : identifiant d'une ruche, texte, par exemple `SN-CASA-001`. Si aucune ruche ne porte cet identifiant, toutes les routes `/api/hives/:id…` répondent **404**.
+- `id` : identifiant d'une ruche, texte, par exemple `SN-CASA-001`. Si aucune ruche ne porte cet identifiant, toutes les routes `/api/hives/:id…` répondent **404**. Si elle existe mais que l'utilisateur n'y a pas accès, elles répondent **403** (`"detail": "Vous n'avez pas accès à la ruche SN-CASA-011."`). L'existence est vérifiée avant les droits.
+
+---
+
+### POST /api/auth/login
+
+Public. Échange une adresse et un mot de passe contre deux jetons.
+
+```json
+{ "email": "admin@queenbee.test", "password": "QueenBee2026!" }
+```
+
+**200**
+
+```json
+{ "token_type": "Bearer", "access_token": "eyJ…", "refresh_token": "eyJ…" }
+```
+
+**400** : `email` ou `password` manque, ou `email` n'est pas une adresse valide.
+
+**401** :
+
+- adresse inconnue ou mot de passe faux : le même message dans les deux cas, pour ne pas révéler quelles adresses ont un compte (`"detail": "Adresse e-mail ou mot de passe incorrect."`) ;
+- compte bloqué : au cinquième échec de suite, le compte est bloqué 15 minutes, même avec le bon mot de passe (`"detail": "Compte bloqué après 5 échecs de connexion, jusqu'à 11:12 UTC."`).
+
+---
+
+### POST /api/auth/refresh
+
+Public. Donne une nouvelle paire de jetons. Le rôle et le site sont relus en base.
+
+```json
+{ "refresh_token": "eyJ…" }
+```
+
+**200** : même forme que `POST /api/auth/login`.
+
+**400** : `refresh_token` manque.
+
+**401** : jeton de renouvellement invalide ou expiré, ou jeton d'accès envoyé à la place (`"detail": "Jeton de renouvellement invalide ou expiré."`).
+
+---
+
+### POST /api/auth/register
+
+Réservée au rôle `admin` (UC-AD01). Crée un compte.
+
+| Champ | Type | Obligatoire |
+| ----- | ---- | ----------- |
+| `email` | adresse e-mail | oui ; enregistrée en minuscules |
+| `password` | texte de 12 à 72 caractères | oui |
+| `role` | `apiculteur`, `coordinateur`, `gestionnaire` ou `admin` | oui |
+| `site_id` | texte | obligatoire pour `apiculteur` et `coordinateur`, interdit pour `gestionnaire` et `admin` |
+
+**201** : le compte, sans l'empreinte du mot de passe.
+
+```json
+{ "id": "2253a0d3-…", "email": "nouveau@queenbee.test", "role": "gestionnaire", "site_id": null, "created_at": "2026-11-20T10:57:32.150Z" }
+```
+
+**400** : corps invalide, ou `site_id` inconnu. **401** : pas de jeton. **403** : l'utilisateur n'est pas admin. **409** : adresse déjà utilisée (`"detail": "Cette ressource existe déjà."`).
+
+---
+
+### GET /api/auth/me
+
+Connecté. L'utilisateur du jeton.
+
+**200**
+
+```json
+{ "id": "3285e783-…", "role": "apiculteur", "site_id": "SN-CASA" }
+```
+
+**401** : jeton absent, invalide ou expiré.
 
 ---
 
 ### GET /health
 
-Indique que le serveur répond.
+Indique que le serveur répond. Public : aucun jeton.
 
 Paramètres : aucun.
 
@@ -59,22 +159,22 @@ Erreur : aucune propre à cette route.
 
 ### GET /api/hives
 
-Liste des ruches.
+Liste des ruches que l'utilisateur peut voir : toutes pour `admin` et `gestionnaire`, celles de son site pour un `coordinateur`, les siennes pour un `apiculteur`.
 
 Paramètres de requête :
 
-- `site_id` : texte, facultatif. Ne garde que les ruches de ce site. Absent ou vide (`?site_id=`) : toutes les ruches. Un site inconnu donne une liste vide.
+- `site_id` : texte, facultatif. Ne garde que les ruches de ce site. Absent ou vide (`?site_id=`) : pas de filtre. Un site inconnu donne une liste vide.
 
 **200**
 
 ```json
 [
-  { "id": "SN-CASA-001", "site_id": "SN-CASA", "status": "active" },
-  { "id": "SN-CASA-002", "site_id": "SN-CASA", "status": "active" }
+  { "id": "SN-CASA-001", "site_id": "SN-CASA", "owner_id": "3285e783-…", "ref_lat": 12.5743, "ref_lon": -16.2873, "status": "active" },
+  { "id": "SN-CASA-002", "site_id": "SN-CASA", "owner_id": "3285e783-…", "ref_lat": 12.5751, "ref_lon": -16.2869, "status": "active" }
 ]
 ```
 
-Erreur : aucune propre à cette route.
+**403** : un coordinateur demande un autre site que le sien (`"detail": "Vous n'avez pas accès au site CI-AGBO."`).
 
 ---
 
@@ -85,8 +185,10 @@ Une ruche.
 **200**
 
 ```json
-{ "id": "SN-CASA-001", "site_id": "SN-CASA", "status": "active" }
+{ "id": "SN-CASA-001", "site_id": "SN-CASA", "owner_id": "3285e783-…", "ref_lat": 12.5743, "ref_lon": -16.2873, "status": "active" }
 ```
+
+**403** : la ruche existe, mais l'utilisateur n'y a pas accès.
 
 **404** : aucune ruche ne porte cet identifiant.
 
@@ -103,7 +205,7 @@ Une ruche.
 
 ### POST /api/hives/:id/measures
 
-Enregistre une mesure envoyée par la passerelle d'un site (trame du § 6.5). La mesure garde le `timestamp` de la trame : l'instant où le capteur l'a prise, pas celui de la réception.
+Réservée au rôle `admin`, qui simule la passerelle (403 pour les autres rôles). Enregistre une mesure envoyée par la passerelle d'un site (trame du § 6.5). La mesure garde le `timestamp` de la trame : l'instant où le capteur l'a prise, pas celui de la réception.
 
 Corps :
 
@@ -229,6 +331,7 @@ Paramètres : aucun en dehors de `:id`.
   {
     "id": "6f1c2b9e-3d4a-4f5b-9c8d-7e6f5a4b3c2d",
     "hive_id": "SN-CASA-001",
+    "author_id": "3285e783-75a0-4f52-9f1d-00b375602821",
     "inspected_at": "2026-10-31T09:30:00Z",
     "colony_status": "forte",
     "queen_present": true,
@@ -246,7 +349,7 @@ Paramètres : aucun en dehors de `:id`.
 
 ### POST /api/hives/:id/inspections
 
-Enregistre une inspection saisie sur l'application mobile, éventuellement hors connexion. L'identifiant est un UUID choisi par l'application, pas par le serveur.
+Réservée aux rôles `apiculteur` et `coordinateur` (403 pour les autres), sur une ruche à laquelle l'utilisateur a accès. Enregistre une inspection saisie sur l'application mobile, éventuellement hors connexion. L'identifiant est un UUID choisi par l'application, pas par le serveur. L'auteur (`author_id`) est l'utilisateur du jeton.
 
 Corps :
 
@@ -271,7 +374,7 @@ Tout autre champ est refusé : l'auteur (`author_id`) n'est jamais choisi par le
 }
 ```
 
-**201** : l'inspection créée, avec `hive_id`, `version` (1), `created_at` et `updated_at` (heure de réception par le serveur). Même forme que dans `GET /api/hives/:id/inspections`.
+**201** : l'inspection créée, avec `hive_id`, `author_id`, `version` (1), `created_at` et `updated_at` (heure de réception par le serveur). Même forme que dans `GET /api/hives/:id/inspections`.
 
 **200** : une inspection portant déjà cet `id` a été reçue pour cette ruche (synchronisation rejouée). Le serveur renvoie l'inspection existante sans créer de doublon ni la modifier.
 

@@ -1,7 +1,6 @@
 // Lit la configuration dans l'environnement (process.env, chargé depuis .env par --env-file).
 // Une valeur invalide lève une erreur au démarrage, avec un message clair.
 const NODE_ENVS = ["development", "production", "test"];
-const STORAGES = ["postgres", "memory"];
 
 function parsePort(brut, nom, defaut) {
   const valeur = brut === undefined || brut === "" ? defaut : Number(brut);
@@ -19,14 +18,9 @@ export function loadConfig(env = process.env) {
     throw new Error(`NODE_ENV invalide (« ${env.NODE_ENV} ») : ${NODE_ENVS.join(", ")} sont acceptés.`);
   }
 
-  const storage = env.STORAGE || "postgres";
-  if (!STORAGES.includes(storage)) {
-    throw new Error(`STORAGE invalide (« ${env.STORAGE} ») : ${STORAGES.join(" ou ")} sont acceptés.`);
-  }
-
-  // Aucune valeur par défaut pour le mot de passe : il doit venir de .env.
-  if (storage === "postgres" && !env.DB_PASSWORD) {
-    throw new Error("DB_PASSWORD est obligatoire quand STORAGE vaut postgres : renseignez-le dans .env.");
+  // Aucune valeur par défaut pour un mot de passe ou un secret : ils doivent venir de .env.
+  if (!env.DB_PASSWORD) {
+    throw new Error("DB_PASSWORD est obligatoire : renseignez-le dans .env.");
   }
 
   const poolMax = env.DB_POOL_MAX === undefined || env.DB_POOL_MAX === "" ? 10 : Number(env.DB_POOL_MAX);
@@ -43,7 +37,26 @@ export function loadConfig(env = process.env) {
     poolMax,
   };
 
-  return { port, nodeEnv, storage, db };
+  for (const nom of ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET"]) {
+    if (!env[nom]) {
+      throw new Error(`${nom} est obligatoire : générez-le avec node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))".`);
+    }
+  }
+  // Deux secrets distincts : un jeton de renouvellement ne doit jamais valider comme jeton d'accès.
+  if (env.JWT_ACCESS_SECRET === env.JWT_REFRESH_SECRET) {
+    throw new Error("JWT_ACCESS_SECRET et JWT_REFRESH_SECRET doivent être différents.");
+  }
+
+  const auth = {
+    accessSecret: env.JWT_ACCESS_SECRET,
+    refreshSecret: env.JWT_REFRESH_SECRET,
+    accessTtl: env.JWT_ACCESS_TTL || "15m",
+    refreshTtl: env.JWT_REFRESH_TTL || "7d",
+    maxFailedLogins: 5,
+    lockMinutes: 15,
+  };
+
+  return { port, nodeEnv, db, auth };
 }
 
 // Configuration chargée une fois, au démarrage. En cas d'erreur, on s'arrête tout de suite

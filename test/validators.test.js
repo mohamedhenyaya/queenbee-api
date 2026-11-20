@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { validate } from "../src/middlewares/validate.js";
 import {
+  loginSchema,
+  registerSchema,
   hivesQuerySchema,
   paginationSchema,
   measureSchema,
@@ -114,4 +116,30 @@ test("refuse des observations de plus de 2 000 caractères", () => {
     () => run(inspectionSchema, { id: UUID, inspected_at: "2026-11-01T09:00:00Z", colony_status: "forte", observations: "a".repeat(2001) }),
     ValidationError,
   );
+});
+
+// --- Authentification
+
+test("login : email et password obligatoires, adresse en .test acceptée", () => {
+  assert.equal(messageOf(loginSchema, {}), "email est obligatoire. password est obligatoire.");
+  assert.deepEqual(run(loginSchema, { email: "admin@queenbee.test", password: "x" }), { email: "admin@queenbee.test", password: "x" });
+});
+
+test("register : site_id obligatoire pour apiculteur et coordinateur", () => {
+  const base = { email: "nouveau@queenbee.test", password: "MotDePasseLong1!" };
+  assert.equal(messageOf(registerSchema, { ...base, role: "apiculteur" }), "site_id est obligatoire.");
+  assert.equal(run(registerSchema, { ...base, role: "coordinateur", site_id: "SN-CASA" }).site_id, "SN-CASA");
+});
+
+test("register : site_id interdit pour gestionnaire et admin", () => {
+  const base = { email: "nouveau@queenbee.test", password: "MotDePasseLong1!" };
+  assert.equal(messageOf(registerSchema, { ...base, role: "admin", site_id: "SN-CASA" }), "site_id n'est pas autorisé.");
+  assert.equal(run(registerSchema, { ...base, role: "gestionnaire" }).role, "gestionnaire");
+});
+
+test("register : mot de passe de 12 à 72 caractères, rôle connu, adresse valide", () => {
+  assert.throws(() => run(registerSchema, { email: "a@queenbee.test", password: "court", role: "gestionnaire" }), ValidationError);
+  assert.throws(() => run(registerSchema, { email: "a@queenbee.test", password: "x".repeat(73), role: "gestionnaire" }), ValidationError);
+  assert.throws(() => run(registerSchema, { email: "a@queenbee.test", password: "MotDePasseLong1!", role: "visiteur" }), ValidationError);
+  assert.throws(() => run(registerSchema, { email: "pas-une-adresse", password: "MotDePasseLong1!", role: "gestionnaire" }), ValidationError);
 });
