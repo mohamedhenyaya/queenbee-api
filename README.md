@@ -1,5 +1,25 @@
 # Queen Bee — API Backend Node.js
 
+## État du livrable du jour 2 (tag `jour2-fin`)
+
+Fait :
+
+- TP 5 : l'API lit et écrit dans PostgreSQL, uniquement avec des requêtes paramétrées. Les temps de l'import ligne à ligne et par lot, et les quatre réponses, sont plus bas.
+- TP 6 : toutes les entrées passent par un schéma Joi. Toutes les erreurs suivent la RFC 9457, sans pile d'exécution ni SQL.
+- TP 7 :
+  - connexion, renouvellement, création de compte par l'administrateur et blocage après 5 échecs ;
+  - contrôle par rôle, par site et par propriétaire ;
+  - journal des requêtes interdites, plus bas.
+- TP 8 : mesures et inspections se rejouent sans doublon. La synchronisation par lot détecte les conflits, et la règle de conflit est plus bas.
+- `npm test` passe : 50 tests sur 50.
+- `.env` est absent du dépôt et de son historique ; `.env.example` contient de faux secrets.
+- La collection Postman passe en entier deux fois de suite (244 assertions sur 244).
+
+Ce qui manque :
+
+- Revue croisée du bilan du jour : les requêtes du groupe voisin qui passent alors qu'elles devraient être refusées seront notées ici.
+- TP 3, étape 4 (jour 1) : la relecture du contrat par un groupe voisin n'a pas encore été faite.
+
 ## État du livrable du jour 1 (tag `jour1-fin`)
 
 Fait :
@@ -48,6 +68,53 @@ test/                 tests des services (faux repositories), des schémas et de
 ```
 
 Chaque service est une fabrique qui reçoit ses dépendances (`createMeasuresService({ hivesService, measuresRepository })`) et n'importe jamais de repository. Aucun contrôleur n'importe de repository.
+
+## TP 8 — Synchronisation idempotente
+
+Sur le terrain, l'application mobile enregistre les inspections hors connexion, puis les envoie en lot au retour du réseau. Si la connexion coupe avant la réponse, elle renvoie tout. Le serveur ne crée aucun doublon et n'écrase jamais, sans le dire, une saisie plus récente.
+
+```
+src/
+  repositories/postgres/measures.repository.js     add : INSERT … ON CONFLICT (hive_id, measured_at) DO NOTHING, puis findOne
+  repositories/postgres/inspections.repository.js  insertIfAbsent : ON CONFLICT (id) DO NOTHING ; updateIfVersion : UPDATE … WHERE version = $7
+  services/inspections.service.js                  addInspection, syncInspections (syncOne traite un élément sans lever d'erreur métier)
+  routes/inspections/, controllers/inspections.controller.js   POST /api/inspections/sync (apiculteur, coordinateur)
+  validators/schemas.js                            syncSchema : { inspections: [1 à 500] }, hive_id obligatoire, version facultative
+```
+
+- **Idempotence.**
+  - Une mesure est reconnue à sa clé (`hive_id`, `measured_at`), une inspection à l'UUID choisi par l'application.
+  - Rejouer un envoi renvoie 200 et l'élément déjà enregistré, au lieu de 201. Ce n'est plus une erreur (409 au TP 6, 500 au TP 5).
+  - Comme `RETURNING` ne renvoie rien après `ON CONFLICT DO NOTHING`, l'élément est relu en base.
+- **Verrouillage optimiste.** Une modification n'est acceptée que si l'appareil envoie la `version` actuelle du serveur, qui passe alors à la suivante. Le `WHERE … AND version = $7` fait la comparaison et l'écriture en une seule requête : deux appareils ne peuvent pas modifier la même version.
+- **Lot.** Chaque inspection reçoit son statut : `created`, `unchanged`, `updated`, `conflict` (avec `current`) ou `rejected` (avec `detail`). Une `AppError` sur un élément devient `rejected` sans arrêter le lot. Toute autre erreur remonte, car c'est un bug.
+- **Tests :**
+  - `inspections.service.test.js` (8 tests) : rejeu sans doublon, conflit sur version périmée, statuts d'un lot, ruche interdite qui n'arrête pas les autres, id pris par une autre ruche, erreur non métier qui remonte ;
+  - `measures.service.test.js` : trame reçue deux fois ;
+  - `validators.test.js` : lot vide, tableau seul, `hive_id` et `version`, 500 éléments au plus.
+- **Collection Postman.** Le dossier « Synchronisation » utilise des UUID neufs à chaque Run, pour rester rejouable. La requête « Sync » envoie `lot.json` tel quel, comme dans l'énoncé.
+
+### Règle de conflit : le serveur l'emporte
+
+Une modification envoyée avec une version périmée est refusée (`conflict`), et la réponse contient l'inspection du serveur (`current`). L'apiculteur voit les deux saisies et choisit quoi garder, puis renvoie sa modification avec `current.version`. Nous écartons « le dernier qui écrit l'emporte » : sur le terrain, l'ordre d'arrivée dépend du réseau et non de l'ordre des saisies, et une observation sanitaire (reine absente, colonie faible) écrasée en silence serait perdue sans que personne le sache.
+
+### Vérifications
+
+Connecté en `api1.sn-casa@queenbee.test`, sur une base neuve :
+
+| Étape | Résultat obtenu |
+| ----- | --------------- |
+| Inspections de SN-CASA-001 avant le lot | 3 |
+| `lot.json`, premier envoi | 200, `created` 3, `rejected` 1 : SN-CASA-011, « Vous n'avez pas accès à la ruche SN-CASA-011. » |
+| Inspections de SN-CASA-001 | 4 |
+| `lot.json`, second envoi | 200, `unchanged` 3, `rejected` 1 |
+| Inspections de SN-CASA-001 | 4 : aucun doublon |
+| Troisième inspection, `"version": 1`, `"colony_status": "normale"` | `updated`, `version` 2 |
+| La même modification une seconde fois | `conflict`, `current.version` 2, « L'inspection a été modifiée entre-temps : version 2 sur le serveur, 1 sur l'appareil. » |
+| `{"inspections": []}` / `lot.json` en admin | 400 « inspections doit contenir au moins 1 élément(s). » / 403 |
+| Mesure `2026-11-03T08:00:00Z` deux fois (admin) | 201, puis 200 |
+| Inspection `…4e09` deux fois sur SN-CASA-004, puis sur SN-CASA-005 | 201, puis 200, puis 409 |
+| `npm test` | 50 tests sur 50 |
 
 ## TP 7 — Authentification et autorisation
 
@@ -141,7 +208,7 @@ Vérifications de l'énoncé, faites sur PostgreSQL :
 | Mesure avec `weight_kg: 500` et `humidity_pct: 120` | 400 « weight_kg doit être inférieur ou égal à 150. humidity_pct doit être inférieur ou égal à 100. » |
 | Mesure sans corps | 400 « timestamp est obligatoire. weight_kg est obligatoire. » |
 | `?limit=abc` / sans `limit` | 400 « limit doit être un nombre. » / 200 avec 50 mesures, `limit` 50, `offset` 0 |
-| La même mesure valide deux fois | 201, puis 409 « Cette ressource existe déjà. » |
+| La même mesure valide deux fois | 201, puis 409 « Cette ressource existe déjà. » (depuis le TP 8 : 201, puis 200) |
 | Inspection avec `author_id` | 400 « author_id n'est pas un champ autorisé. » |
 | Inspection datée de 2099 | 400 « inspected_at ne peut pas être dans le futur. » |
 | JSON mal formé / corps de plus de 1 Mo | 400 / 413 |

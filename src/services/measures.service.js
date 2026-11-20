@@ -5,7 +5,9 @@ import { ValidationError } from "../errors.js";
 // que les règles qui ont besoin de la ruche. Les droits passent par hivesService.getHive.
 export function createMeasuresService({ hivesService, measuresRepository }) {
   return {
-    // Enregistre une trame de la passerelle. Lève NotFoundError, ForbiddenError ou ValidationError.
+    // Enregistre une trame de la passerelle. Renvoie { measure, created } : created vaut false
+    // si la trame avait déjà été reçue (rejeu après une coupure). Lève NotFoundError,
+    // ForbiddenError ou ValidationError.
     async addMeasure(user, hiveId, measure) {
       const hive = await hivesService.getHive(user, hiveId);
 
@@ -14,7 +16,7 @@ export function createMeasuresService({ hivesService, measuresRepository }) {
       }
 
       // On garde le timestamp de la trame : l'instant de la mesure, pas celui de la réception.
-      return measuresRepository.insert({ ...measure, hive_id: hive.id, site_id: hive.site_id });
+      return measuresRepository.add({ ...measure, hive_id: hive.id, site_id: hive.site_id });
     },
 
     // Historique paginé, de la plus récente à la plus ancienne.

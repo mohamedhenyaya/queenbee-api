@@ -240,6 +240,8 @@ Les champs facultatifs peuvent valoir `null`.
 
 **201** : la mesure enregistrée, telle qu'elle sera relue (`hive_id` et `site_id` sont ceux de la ruche).
 
+**200** : une mesure existait déjà pour cette ruche à ce `timestamp` (trame renvoyée par la passerelle après une coupure). Rien n'est modifié, et le serveur renvoie la mesure déjà enregistrée. Envoyer deux fois la même trame ne crée donc pas de doublon et n'est pas une erreur.
+
 **400** :
 
 - `timestamp` ou `weight_kg` manque ;
@@ -274,7 +276,6 @@ Dans ce cas, rien n'est enregistré.
 
 **404** : aucune ruche ne porte cet identifiant.
 
-**409** : une mesure existe déjà pour cette ruche à ce `timestamp` (`"detail": "Cette ressource existe déjà."`).
 
 ---
 
@@ -400,3 +401,66 @@ Tout autre champ est refusé : l'auteur (`author_id`) n'est jamais choisi par le
 **404** : aucune ruche ne porte cet identifiant.
 
 **409** : cet `id` est déjà utilisé par une inspection d'une autre ruche.
+
+Cette route ne modifie jamais une inspection : pour modifier, passer par `POST /api/inspections/sync` avec la `version` connue.
+
+---
+
+### POST /api/inspections/sync
+
+Réservée aux rôles `apiculteur` et `coordinateur` (403 pour les autres). Synchronise un lot d'inspections saisies hors connexion. L'application peut renvoyer le même lot autant de fois que nécessaire, par exemple après une coupure avant la réponse : cela ne crée aucun doublon (idempotence).
+
+Corps : un objet `{ "inspections": [ … ] }` de 1 à 500 éléments. Chaque élément a les champs de `POST /api/hives/:id/inspections`, plus :
+
+| Champ | Type | Obligatoire |
+| ----- | ---- | ----------- |
+| `hive_id` | texte | oui |
+| `version` | entier ≥ 1 | non ; seulement pour **modifier** une inspection déjà synchronisée : la version que l'appareil connaît |
+
+```json
+{
+  "inspections": [
+    { "id": "6f1d2c3a-1b2c-4d5e-8f60-0a1b2c3d4e01", "hive_id": "SN-CASA-001", "inspected_at": "2026-11-02T08:15:00Z", "colony_status": "forte" },
+    { "id": "6f1d2c3a-1b2c-4d5e-8f60-0a1b2c3d4e03", "hive_id": "SN-CASA-003", "inspected_at": "2026-11-02T09:05:00Z", "colony_status": "normale", "version": 1 }
+  ]
+}
+```
+
+Les inspections sont traitées une par une, dans l'ordre. Chacune reçoit son propre statut, et une inspection refusée n'empêche pas les autres :
+
+| Cas | `status` | Champs en plus |
+| --- | -------- | -------------- |
+| Sans `version`, `id` encore inconnu | `created` | `version` (1) |
+| Sans `version`, `id` déjà reçu pour cette ruche | `unchanged` | `version` (celle du serveur) ; rien n'est modifié |
+| `version` égale à celle du serveur | `updated` | `version` : la nouvelle (+1) |
+| `version` périmée : l'inspection a été modifiée entre-temps | `conflict` | `detail`, et `current` : l'inspection telle qu'elle est sur le serveur, qui n'est pas modifiée |
+| Ruche inconnue ou hors des droits, `id` pris par une autre ruche, `version` sur une inspection inconnue | `rejected` | `detail` |
+
+Règle de conflit : le serveur l'emporte. Une modification périmée n'écrase jamais la donnée du serveur ; l'appareil reçoit `current` et l'apiculteur choisit quoi garder, puis renvoie sa modification avec `current.version`.
+
+**200** : toujours, si le lot est bien formé ; le détail est dans `results`.
+
+```json
+{
+  "summary": { "created": 3, "unchanged": 0, "updated": 0, "conflict": 0, "rejected": 1 },
+  "results": [
+    { "id": "6f1d2c3a-1b2c-4d5e-8f60-0a1b2c3d4e01", "status": "created", "version": 1 },
+    { "id": "6f1d2c3a-1b2c-4d5e-8f60-0a1b2c3d4e04", "status": "rejected", "detail": "Vous n'avez pas accès à la ruche SN-CASA-011." }
+  ]
+}
+```
+
+Un conflit :
+
+```json
+{
+  "id": "6f1d2c3a-1b2c-4d5e-8f60-0a1b2c3d4e03",
+  "status": "conflict",
+  "detail": "L'inspection a été modifiée entre-temps : version 2 sur le serveur, 1 sur l'appareil.",
+  "current": { "id": "6f1d2c3a-1b2c-4d5e-8f60-0a1b2c3d4e03", "hive_id": "SN-CASA-003", "colony_status": "normale", "version": 2, "…": "…" }
+}
+```
+
+**400** : lot vide (`"detail": "inspections doit contenir au moins 1 élément(s)."`), plus de 500 éléments, tableau envoyé sans l'objet `{ "inspections": … }` (`"detail": "value doit être un objet JSON."`), ou un élément invalide (le lot entier est alors refusé, rien n'est enregistré).
+
+**401** : pas de jeton. **403** : rôle autre que `apiculteur` ou `coordinateur`.

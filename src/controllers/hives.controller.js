@@ -13,9 +13,10 @@ export function createHivesController({ hivesService, measuresService, inspectio
       res.json(await hivesService.getHive(req.user, req.params.id));
     },
 
+    // 201 à la première réception, 200 si la trame est rejouée : le rejeu n'est pas une erreur.
     async addMeasure(req, res) {
-      const measure = await measuresService.addMeasure(req.user, req.params.id, req.validated);
-      res.status(201).json(measure);
+      const { measure, created } = await measuresService.addMeasure(req.user, req.params.id, req.validated);
+      res.status(created ? 201 : 200).json(measure);
     },
 
     async listMeasures(req, res) {

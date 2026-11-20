@@ -8,6 +8,7 @@ import {
   paginationSchema,
   measureSchema,
   inspectionSchema,
+  syncSchema,
 } from "../src/validators/schemas.js";
 import { ValidationError } from "../src/errors.js";
 
@@ -142,4 +143,26 @@ test("register : mot de passe de 12 à 72 caractères, rôle connu, adresse vali
   assert.throws(() => run(registerSchema, { email: "a@queenbee.test", password: "x".repeat(73), role: "gestionnaire" }), ValidationError);
   assert.throws(() => run(registerSchema, { email: "a@queenbee.test", password: "MotDePasseLong1!", role: "visiteur" }), ValidationError);
   assert.throws(() => run(registerSchema, { email: "pas-une-adresse", password: "MotDePasseLong1!", role: "gestionnaire" }), ValidationError);
+});
+
+// --- Synchronisation
+
+test("sync : un lot vide est refusé", () => {
+  assert.equal(messageOf(syncSchema, { inspections: [] }), "inspections doit contenir au moins 1 élément(s).");
+});
+
+test("sync : un tableau seul, sans l'objet { inspections }, est refusé", () => {
+  assert.throws(() => run(syncSchema, []), ValidationError);
+});
+
+test("sync : hive_id obligatoire dans le lot, version entière et positive", () => {
+  const item = { id: UUID, inspected_at: "2026-11-01T09:00:00Z", colony_status: "forte" };
+  assert.match(messageOf(syncSchema, { inspections: [item] }), /hive_id est obligatoire/);
+  assert.throws(() => run(syncSchema, { inspections: [{ ...item, hive_id: "SN-CASA-001", version: 0 }] }), ValidationError);
+  assert.equal(run(syncSchema, { inspections: [{ ...item, hive_id: "SN-CASA-001", version: 2 }] }).inspections[0].version, 2);
+});
+
+test("sync : au plus 500 inspections par lot", () => {
+  const item = { id: UUID, hive_id: "SN-CASA-001", inspected_at: "2026-11-01T09:00:00Z", colony_status: "forte" };
+  assert.throws(() => run(syncSchema, { inspections: Array(501).fill(item) }), ValidationError);
 });

@@ -61,8 +61,9 @@ export const measureSchema = Joi.object({
   battery_pct: Joi.number().integer().min(0).max(100).allow(null),
 });
 
-// Inspection saisie sur le terrain ; son id (UUID) est choisi par l'application mobile.
-export const inspectionSchema = Joi.object({
+// Champs d'une inspection saisie sur le terrain ; son id (UUID) est choisi par l'application
+// mobile. Sortis dans un objet pour servir à inspectionSchema et à syncSchema.
+const inspectionFields = {
   id: Joi.string().guid().required(),
   hive_id: Joi.string(),
   inspected_at: Joi.date().iso().max("now").required()
@@ -70,4 +71,20 @@ export const inspectionSchema = Joi.object({
   colony_status: Joi.string().valid(...COLONY_STATUSES).required(),
   queen_present: Joi.boolean().allow(null),
   observations: Joi.string().max(2000).allow("", null),
+};
+
+export const inspectionSchema = Joi.object(inspectionFields);
+
+// Lot de synchronisation : chaque inspection précise sa ruche ; version n'est là que pour
+// une modification (la version que l'appareil connaît).
+export const syncSchema = Joi.object({
+  inspections: Joi.array()
+    .items(Joi.object({
+      ...inspectionFields,
+      hive_id: Joi.string().required(),
+      version: Joi.number().integer().min(1),
+    }))
+    .min(1)
+    .max(500)
+    .required(),
 });
