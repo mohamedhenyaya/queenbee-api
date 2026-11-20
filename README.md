@@ -31,14 +31,14 @@ npm test               # tests node:test
 
 ```
 src/
-  server.js           crée les repositories en mémoire, appelle createApp, puis listen
+  server.js           choisit le stockage (STORAGE), crée les repositories, appelle createApp, puis listen
   app.js              createApp(repositories) : branche services, contrôleur, routeur
-  config.js           lit PORT et NODE_ENV
+  config.js           lit PORT, NODE_ENV, STORAGE et DB_*
   errors.js           NotFoundError, ValidationError, ConflictError
   routes/hives/       URL + verbe -> méthode du contrôleur
   controllers/        lit la requête, choisit le code HTTP
   services/           règles métier (validation, plages physiques)
-  repositories/memory lecture et écriture des données en mémoire
+  repositories/       memory/ (en mémoire) et postgres/ (PostgreSQL), mêmes méthodes
   middlewares/        requestLogger, notFoundHandler, errorHandler
   utils/problem.js    sendProblem, format d'erreur RFC 9457
 test/                 tests des services avec de faux repositories
@@ -47,6 +47,41 @@ test/                 tests des services avec de faux repositories
 Chaque service est une fabrique qui reçoit ses dépendances (`createMeasuresService({ hivesService, measuresRepository })`) et n'importe jamais de repository. Aucun contrôleur n'importe de repository : seuls les repositories changeront au jour 2 (PostgreSQL).
 
 Au démarrage, l'API charge 5 ruches et les mesures du 31 octobre des ruches SN-CASA (fichier `data/mesures-SN-CASA-2026-10-31.ndjson`). Les données sont perdues à chaque redémarrage.
+
+## TP 5 — Brancher PostgreSQL
+
+`STORAGE=postgres` (par défaut) ou `STORAGE=memory` dans `.env` choisit le stockage. Seuls `config.js`, `server.js`, `db.js` et `repositories/` ont changé : `git diff jour1-fin --stat -- src/services src/controllers src/routes` n'affiche rien.
+
+```
+src/
+  db.js                      createPool() : pool pg, NUMERIC converti en nombre
+  repositories/memory/index.js     createMemoryRepositories()
+  repositories/postgres/index.js   createPostgresRepositories(pool)
+  repositories/postgres/*.repository.js   mêmes méthodes que la version en mémoire
+```
+
+Variables ajoutées à `.env` : `STORAGE` (`postgres` ou `memory`), `DB_POOL_MAX` (10 par défaut). `DB_PASSWORD` est obligatoire en mode `postgres`, sans valeur par défaut.
+
+### Insertion en masse (`scripts/import-measures.js`)
+
+4 800 mesures du 31 octobre, premier essai de chaque mode (un second essai donne 15 459 ms et 298 ms). Node.js 24, Windows 11, PostgreSQL 17 dans Docker.
+
+| Mode          | Durée (ms) |
+| ------------- | ---------: |
+| ligne à ligne |     10 929 |
+| par lot       |        221 |
+
+1. **Quel temps dans chaque mode ? D'où vient l'écart ?**
+   L'insertion par lot est environ 50 fois plus rapide : 221 ms contre près de 11 s. Ligne à ligne, chaque mesure coûte un aller-retour réseau avec la base et un `COMMIT` implicite, donc une écriture forcée sur disque : 4 800 fois. Par lot, il n'y a que 5 requêtes de 1 000 lignes et un seul `COMMIT`, donc une seule synchronisation du journal sur disque.
+
+2. **Si la 2 001e mesure provoquait une erreur, que resterait-il en base ?**
+   Ligne à ligne : les 2 000 premières mesures, déjà validées une par une, restent en base (import à moitié fait). Par lot : rien, le `ROLLBACK` annule toute la transaction, y compris les 2 lots de 1 000 déjà envoyés.
+
+3. **Pourquoi `pool.connect()` au lieu de `pool.query()` ?**
+   Une transaction est attachée à une connexion : `BEGIN`, les `INSERT` et le `COMMIT` doivent passer par la même. `pool.query()` peut prêter une connexion différente à chaque appel, et le `BEGIN` serait alors sans effet sur les `INSERT` suivants.
+
+4. **Et si `client.release()` n'était pas dans le `finally`, avec dix erreurs de suite ?**
+   Chaque erreur laisserait une connexion empruntée sans jamais la rendre. Après dix erreurs (`DB_POOL_MAX=10`), le pool est vide : toutes les requêtes suivantes attendent une connexion, puis échouent au bout de `connectionTimeoutMillis` (5 s). L'API ne répond plus que par des erreurs 500.
 
 ## TP 2 — Journalisation
 
